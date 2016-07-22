@@ -9,6 +9,9 @@ var async = require('async');
 var request = require('request');
 var xml2js = require('xml2js');
 var _ = require('lodash');
+var session = require('express-session');
+var passport = require('passport');
+var LocalStrategy = require('passport-local').Strategy;
 
 var app = express();
 
@@ -17,11 +20,19 @@ app.use(logger('dev'));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded());
 app.use(cookieParser());
+app.use(session({ secret: 'keyboard cat' }));
+app.use(passport.initialize());
+app.use(passport.session());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.listen(app.get('port'), function() {
   console.log('Express server listening on port ' + app.get('port'));
 });
+
+function ensureAuthenticated(req, res, next) {
+  if (req.isAuthenticated()) next();
+  else res.send(401);
+}
 
 var showSchema = new mongoose.Schema({
   _id: Number,
@@ -99,8 +110,39 @@ app.get('/api/shows/:id', function(req, res, next) {
   });
 });
 
+app.post('/api/login', function(req, res, next) {
+  User.findOne({ email: req.body.email }, function(err, user) {
+    if (!user) return res.send(401, 'User does not exist');
+    user.comparePassword(req.body.password, function(err, isMatch) {
+      if (!isMatch) return res.send(401, 'Invalid email and/or password');
+      var token = createJwtToken(user);
+      res.send({ token: token });
+    });
+  });
+});
 
+app.post('/api/signup', function(req, res, next) {
+  var user = new User({
+    email: req.body.email,
+    password: req.body.password
+  });
+  user.save(function(err) {
+    if (err) return next(err);
+    res.send(200);
+  });
+});
 
+app.get('/api/logout', function(req, res, next) {
+  req.logout();
+  res.send(200);
+});
+
+app.use(function(req, res, next) {
+  if (req.user) {
+    res.cookie('user', JSON.stringify(req.user));
+  }
+  next();
+});
 app.post('/api/shows', function(req, res, next) {
   var xml2js = require('xml2js');
   var apiKey = '9EF1D1E7D28FDA0B';
